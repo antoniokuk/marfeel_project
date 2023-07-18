@@ -1,21 +1,42 @@
-# Crea el espacio de nombres de la aplicación
-resource "kubernetes_namespace" "api_app_namespace" {
+# Crear el espacio de nombres para la aplicación
+resource "kubernetes_namespace" "app_namespace" {
   metadata {
-    name = "api-app"
+    name = "my-app-namespace"
   }
 }
 
-# Crea el Deployment de la aplicación
-resource "kubernetes_deployment" "api_app_deployment" {
+# Crear el ConfigMap para almacenar el archivo HTML personalizado
+resource "kubernetes_config_map" "custom_html" {
   metadata {
-    name      = "api-app-deployment"
-    namespace = kubernetes_namespace.api_app_namespace.metadata.0.name
+    name      = "custom-html"
+    namespace = kubernetes_namespace.app_namespace.metadata.0.name
+  }
+
+  data = {
+    "statics.html" = <<-EOT
+<html>
+<head>
+  <title>Custom HTML Page</title>
+</head>
+<body>
+  <h1>Bienvenido a mi página HTML personalizada!</h1>
+</body>
+</html>
+EOT
+  }
+}
+
+# Crear el Deployment para la aplicación nginx
+resource "kubernetes_deployment" "app_deployment" {
+  metadata {
+    name      = "my-app-deployment"
+    namespace = kubernetes_namespace.app_namespace.metadata.0.name
   }
 
   spec {
     selector {
       match_labels = {
-        app = "api-app"
+        app = "my-app"
       }
     }
 
@@ -24,16 +45,31 @@ resource "kubernetes_deployment" "api_app_deployment" {
     template {
       metadata {
         labels = {
-          app = "api-app"
+          app = "my-app"
         }
       }
 
       spec {
         container {
-          name  = "api-app-container"
-          image = "gcr.io/google_containers/echoserver:1.4"
-          port {
-            container_port = 8080
+          name  = "my-app-container"
+          image = "nginx"
+
+          ports {
+            container_port = 80
+          }
+
+          volume_mount {
+            name       = "custom-html-volume"
+            mount_path = "/usr/share/nginx/html"
+            read_only  = true
+          }
+        }
+
+        volume {
+          name = "custom-html-volume"
+
+          config_map {
+            name = kubernetes_config_map.custom_html.metadata.0.name
           }
         }
       }
@@ -41,34 +77,33 @@ resource "kubernetes_deployment" "api_app_deployment" {
   }
 }
 
-# Crea el Service para exponer la aplicación
-resource "kubernetes_service" "api_app_service" {
+# Crear el Service para exponer la aplicación
+resource "kubernetes_service" "app_service" {
   metadata {
-    name      = "api-app-service"
-    namespace = kubernetes_namespace.api_app_namespace.metadata.0.name
+    name      = "my-app-service"
+    namespace = kubernetes_namespace.app_namespace.metadata.0.name
   }
 
   spec {
     selector = {
-      app = "api-app"
+      app = "my-app"
     }
 
     port {
-      protocol = "TCP"
-      port     = 80
-      target_port = 8080
+      protocol    = "TCP"
+      port        = 80
+      target_port = 80
     }
   }
 }
 
-# Crea el Ingress para dirigir las solicitudes a la aplicación
-resource "kubernetes_ingress" "api_app_ingress" {
+# Crear el Ingress para dirigir las solicitudes a /statics.html hacia la aplicación
+resource "kubernetes_ingress" "app_ingress" {
   metadata {
-    name      = "api-app-ingress"
-    namespace = kubernetes_namespace.api_app_namespace.metadata.0.name
+    name      = "my-app-ingress"
+    namespace = kubernetes_namespace.app_namespace.metadata.0.name
     annotations = {
       "kubernetes.io/ingress.class" = "alb"
-      "alb.ingress.kubernetes.io/target-type" = "ip"
     }
   }
 
@@ -76,9 +111,9 @@ resource "kubernetes_ingress" "api_app_ingress" {
     rule {
       http {
         path {
-          path    = "/api"
+          path    = "/statics.html"
           backend {
-            service_name = kubernetes_service.api_app_service.metadata.0.name
+            service_name = kubernetes_service.app_service.metadata.0.name
             service_port = 80
           }
         }
